@@ -1,0 +1,31 @@
+name: Tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start PostgreSQL, Redis, API and workers
+        run: |
+          printf 'POSTGRES_PASSWORD=ciDatabaseOnly123\nAPI_KEY=ci-api-key\n' > .env
+          docker compose up --build -d
+      - name: Exercise real queued polling
+        run: python tests/integration_smoke.py
+      - if: always()
+        run: docker compose logs --tail=80
+      - if: always()
+        run: docker compose down -v

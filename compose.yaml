@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tracker
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes: ["postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker"]
+      interval: 5s
+      retries: 15
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 15
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: &env
+      DATABASE_URL: postgresql+asyncpg://tracker:${POSTGRES_PASSWORD}@db/tracker
+      REDIS_URL: redis://redis:6379/0
+      API_KEY: ${API_KEY:?Set API_KEY in .env}
+      AUTO_CREATE_DB: "0"
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      DEMO_PRICE: ${DEMO_PRICE:-19.95}
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    build: .
+    environment: *env
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  worker:
+    build: .
+    environment: *env
+    command: ["celery", "-A", "tracker.worker", "worker", "--loglevel=INFO", "--concurrency=2"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+  beat:
+    build: .
+    environment: *env
+    command: ["celery", "-A", "tracker.worker", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat"]
+    depends_on:
+      redis: {condition: service_healthy}
+volumes:
+  postgres:
